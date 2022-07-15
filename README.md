@@ -19,7 +19,7 @@ There are two web interfaces that can be used to query the server:
    Both the new websocket protocol 'graphql-transport-ws' (from graphql-ws library) and the old protocol can be specified in the subscription
    
    Configuration:
-   - Get: http://localhost:8080/wl
+   - GET: http://localhost:8080/ws
    - Subscription URL: ws://localhost:8080/ws
    - Subscription type: Websocket or Websocket (graphql-ws) for the new protocol
    - Connection parameters: {}
