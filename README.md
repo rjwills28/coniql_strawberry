@@ -7,7 +7,7 @@ A test implementation of the Coniql application using Strawberry GraphQL API
 ## Start server
 This will start the server on http://localhost:8080/ws:
 
-```pipenv run -m coniql_strawberry```
+```pipenv run coniql_strawberry```
 
 ## Test client
 There are two web interfaces that can be used to query the server:
