@@ -173,10 +173,11 @@ def make_context() -> Dict[str, Any]:
     context = dict(store=store)
     return context
 
+context = make_context()
 
 class MyGraphQLView(GraphQLView):
     async def get_context(self, request: web.Request, response: web.StreamResponse):
-        ctx = make_context()
+        ctx = context
         return {"request": request, "response": response, "ctx": ctx}
 
 
