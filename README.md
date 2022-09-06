@@ -9,6 +9,9 @@ This will start the server on http://localhost:8080/ws:
 
 ```pipenv run coniql_strawberry```
 
+## Additional arguments
+- `--cors`: allow CORS for all origins and routes. Required when making PV 'put' requests from a web application.
+
 ## Test client
 There are two web interfaces that can be used to query the server:
 
