@@ -1,7 +1,12 @@
 import asyncio
+import base64
+import json
+from argparse import ArgumentParser
 from enum import Enum, auto
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
+import aiohttp_cors
+import numpy as np
 import strawberry
 from aiohttp import web
 from strawberry.aiohttp.views import GraphQLView
@@ -81,6 +86,39 @@ async def subscribe_channel(id, ctx) -> AsyncIterator[Any]:
         # yield dict(subscribeChannel=SubscribeChannel(channel_id, channel))
 
 
+async def put_channel(
+    ids: List[str], put_values: List[str], timeout, ctx
+) -> Sequence[DeferredChannel]:
+    store: PluginStore = ctx["store"]
+    pvs = []
+    plugins = set()
+    for channel_id in ids:
+        plugin, config, channel_id = store.plugin_config_id(channel_id)
+        pv = config.write_pv
+        assert pv, f"{channel_id} is configured read-only"
+        plugins.add(plugin)
+        pvs.append(store.transport_pv(pv)[1])
+    values = []
+    for value in put_values:
+        if value[:1] in "[{":
+            # need to json decode
+            value = json.loads(value)
+            if isinstance(value, dict):
+                # decode base64 array
+                dtype = np.dtype(value["numberType"].lower())
+                value_b = base64.b64decode(value["base64"])
+                # https://stackoverflow.com/a/6485943
+                value = np.frombuffer(value_b, dtype=dtype)
+        values.append(value)
+    assert len(values) == len(pvs), "Mismatch in ids and values length"
+    assert len(plugins) == 1, "Can only put to pvs with the same transport, not %s" % [
+        p.transport for p in plugins
+    ]
+    await plugins.pop().put_channels(pvs, values, timeout)
+    channels = [GetChannel(channel_id, timeout, store) for channel_id in ids]
+    return channels
+
+
 # Schema
 @strawberry.type
 class Range:
@@ -157,6 +195,7 @@ class Channel:
     @strawberry.field
     def value(self) -> ChannelValue:
         return channel_value(self)
+
     # "When was the value last updated"
     time: ChannelTime
     # "Status of the connection, whether is is mutable, and alarm info"
@@ -173,7 +212,9 @@ def make_context() -> Dict[str, Any]:
     context = dict(store=store)
     return context
 
+
 context = make_context()
+
 
 class MyGraphQLView(GraphQLView):
     async def get_context(self, request: web.Request, response: web.StreamResponse):
@@ -200,8 +241,31 @@ class Subscription:
         return subscribe_channel(id, info.context["ctx"])
 
 
+@strawberry.type
+class Mutation:
+    @strawberry.mutation
+    async def putChannels(
+        self,
+        info: Info,
+        ids: List[strawberry.ID],
+        values: List[str],
+        timeout: float = 5.0,
+    ) -> List[Channel]:
+        return await put_channel(ids, values, timeout, info.context["ctx"])
+
+
 def main(args=None) -> None:
-    schema = strawberry.Schema(query=Query, subscription=Subscription)
+    """
+    Entry point of the application.
+    """
+    parser = ArgumentParser(description="CONtrol system Interface over graphQL")
+    parser.add_argument(
+        "--cors", action="store_true", help="Allow CORS for all origins and routes"
+    )
+    parsed_args = parser.parse_args(args)
+    schema = strawberry.Schema(
+        query=Query, subscription=Subscription, mutation=Mutation
+    )
 
     view = MyGraphQLView(
         schema=schema,
@@ -210,6 +274,18 @@ def main(args=None) -> None:
 
     app = web.Application()
 
-    app.router.add_route("*", "/ws", view)
+    app.router.add_route("GET", "/ws", view)
+    app.router.add_route("POST", "/graphql", view)
+
+    if parsed_args.cors:
+        # Enable CORS for all origins on all routes.
+        cors = aiohttp_cors.setup(app)
+        for route in app.router.routes():
+            allow_all = {
+                "*": aiohttp_cors.ResourceOptions(
+                    allow_headers=("*"), max_age=3600, allow_credentials=True
+                )
+            }
+            cors.add(route, allow_all)
 
     web.run_app(app)
